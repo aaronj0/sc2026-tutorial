@@ -1,0 +1,310 @@
+# Stage 1: LLVM builder
+ARG CUDA_BASE_IMAGE=nvcr.io/nvidia/cuda:13.2.1-runtime-ubuntu22.04
+FROM ${CUDA_BASE_IMAGE} AS llvm-builder
+ARG LLVM_REPO=https://github.com/aaronj0/llvm-project.git
+ARG LLVM_TAG=sc26
+ARG LLVM_COMMIT=f697ebdc1ea5148e1a8febec297ba27397b6daa4
+ENV DEBIAN_FRONTEND=noninteractive
+RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://ports.ubuntu.com/ubuntu-ports|g' /etc/apt/sources.list \
+ && printf 'Acquire::Retries "5";\nAcquire::https::Timeout "30";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries \
+ && apt-get update -y \
+ && apt-get install -y --no-install-recommends \
+    git cmake ninja-build lld build-essential ca-certificates python3 python3-dev \
+ && rm -rf /var/lib/apt/lists/*
+RUN case "$(dpkg --print-architecture)" in \
+      amd64) native_llvm_target=X86; default_link_jobs=2 ;; \
+      arm64) native_llvm_target=AArch64; default_link_jobs=1 ;; \
+      *) echo "Unsupported LLVM build architecture" >&2; exit 1 ;; \
+    esac \
+ && llvm_targets="${native_llvm_target};NVPTX" \
+ && link_jobs="${default_link_jobs}" \
+ && git clone --depth 1 --branch ${LLVM_TAG} ${LLVM_REPO} /src/llvm \
+ && test "$(git -C /src/llvm rev-parse HEAD)" = "${LLVM_COMMIT}" \
+ && cmake -S /src/llvm/llvm -B /src/llvm-build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DLLVM_ENABLE_PROJECTS="clang;lld" \
+      -DLLVM_TARGETS_TO_BUILD="${llvm_targets}" \
+      -DLLVM_ENABLE_ASSERTIONS=OFF \
+      -DLLVM_USE_LINKER=lld \
+      -DLLVM_INSTALL_UTILS=ON \
+      -DLLVM_INCLUDE_TESTS=OFF \
+      -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
+      -DCLANG_ENABLE_ARCMT=OFF \
+      -DLLVM_PARALLEL_LINK_JOBS="${link_jobs}" \
+      -DCMAKE_INSTALL_PREFIX=/opt/llvm \
+ && cmake --build /src/llvm-build --target install \
+ && rm -rf /src/llvm /src/llvm-build
+
+# Stage 2: the tutorial image
+FROM ${CUDA_BASE_IMAGE}
+
+# The development packages and build environment of NVIDIA's CUDA 13.2.1 devel image, on the
+# runtime image so that Nsight Compute is installed and pruned in one layer.
+ENV NV_CUDA_CUDART_DEV_VERSION=13.2.75-1 \
+    NV_NVML_DEV_VERSION=13.2.82-1 \
+    NV_LIBCUSPARSE_DEV_VERSION=12.7.10.1-1 \
+    NV_LIBNPP_DEV_VERSION=13.1.0.48-1 \
+    NV_LIBNPP_DEV_PACKAGE=libnpp-dev-13-2=13.1.0.48-1 \
+    NV_LIBCUBLAS_DEV_VERSION=13.4.0.1-1 \
+    NV_LIBCUBLAS_DEV_PACKAGE_NAME=libcublas-dev-13-2 \
+    NV_LIBCUBLAS_DEV_PACKAGE=libcublas-dev-13-2=13.4.0.1-1 \
+    NV_CUDA_NSIGHT_COMPUTE_VERSION=13.2.1-1 \
+    NV_CUDA_NSIGHT_COMPUTE_DEV_PACKAGE=cuda-nsight-compute-13-2=13.2.1-1 \
+    LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+
+ENV PYTHON_VERSION=3.12 \
+    NSIGHT_SYSTEMS_VERSION=2026.1.1 \
+    NSIGHT_SYSTEMS_AMD64_DEB_FILE=2026_1/NsightSystems-linux-cli-public-2026.1.1.204-3717666.deb \
+    NSIGHT_SYSTEMS_ARM64_DEB_FILE=2026_1/nsight-systems-cli-2026.1.1_2026.1.1.204-1_arm64.deb \
+    NSIGHT_COMPUTE_VERSION=2026.1.1 \
+    NSIGHT_COMPUTE_PACKAGE_VERSION=2026.1.1.2-1 \
+    OMPI_ALLOW_RUN_AS_ROOT=1 \
+    OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MPLCONFIGDIR=/tmp/matplotlib_cache \
+    PATH=/sc2026-tutorial/brev/wrappers:/usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
+
+ENV NSYS_PATH=/opt/nvidia/nsight-systems-cli/${NSIGHT_SYSTEMS_VERSION}/bin/nsys \
+    NCU_PATH=/opt/nvidia/nsight-compute/${NSIGHT_COMPUTE_VERSION}/ncu
+
+RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://ports.ubuntu.com/ubuntu-ports|g' /etc/apt/sources.list \
+ && printf 'Acquire::Retries "5";\nAcquire::https::Timeout "30";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries
+
+# The pinned CUDA development packages, without the full Nsight Compute package. The complete
+# dependency closure is pinned because NVIDIA's repository publishes newer patch builds under the
+# CUDA 13.2 name. Of the static archives only libcudart_static.a, which nvcc links, is kept; the
+# math libraries' static archives are not used.
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) cuda_arch_dev_package="cuda-sandbox-dev-13-2=13.2.82-1" ;; \
+      arm64) cuda_arch_dev_package="libcudla-dev-13-2=13.2.75-1" ;; \
+      *) echo "Unsupported CUDA development architecture" >&2; exit 1 ;; \
+    esac; \
+    apt-get update -y; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-upgrade \
+    "${cuda_arch_dev_package}" \
+    "cuda-cccl-13-2=13.2.75-1" \
+    "cuda-command-line-tools-13-2=${NV_CUDA_LIB_VERSION}" \
+    "cuda-compiler-13-2=${NV_CUDA_LIB_VERSION}" \
+    "cuda-crt-13-2=13.2.78-1" \
+    "cuda-cudart-dev-13-2=${NV_CUDA_CUDART_DEV_VERSION}" \
+    "cuda-culibos-dev-13-2=13.2.75-1" \
+    "cuda-cuobjdump-13-2=13.2.78-1" \
+    "cuda-cupti-13-2=13.2.75-1" \
+    "cuda-cupti-dev-13-2=13.2.75-1" \
+    "cuda-cuxxfilt-13-2=13.2.78-1" \
+    "cuda-driver-dev-13-2=13.2.75-1" \
+    "cuda-gdb-13-2=13.2.75-1" \
+    "cuda-minimal-build-13-2=${NV_CUDA_LIB_VERSION}" \
+    "cuda-libraries-dev-13-2=${NV_CUDA_LIB_VERSION}" \
+    "cuda-nvcc-13-2=13.2.78-1" \
+    "cuda-nvdisasm-13-2=13.2.78-1" \
+    "cuda-nvml-dev-13-2=${NV_NVML_DEV_VERSION}" \
+    "cuda-nvprune-13-2=13.2.78-1" \
+    "cuda-nvrtc-dev-13-2=13.2.78-1" \
+    "cuda-profiler-api-13-2=13.2.75-1" \
+    "cuda-sanitizer-13-2=13.2.76-1" \
+    "cuda-tileiras-13-2=13.2.78-1" \
+    "${NV_LIBNPP_DEV_PACKAGE}" \
+    "libcusparse-dev-13-2=${NV_LIBCUSPARSE_DEV_VERSION}" \
+    "${NV_LIBCUBLAS_DEV_PACKAGE}" \
+    "libcufft-dev-13-2=12.2.0.46-1" \
+    "libcufile-dev-13-2=1.17.1.22-1" \
+    "libcuobjclient-dev-13-2=1.1.1.22-1" \
+    "libcurand-dev-13-2=10.4.2.55-1" \
+    "libcusolver-dev-13-2=12.2.0.1-1" \
+    "libnvfatbin-dev-13-2=13.2.78-1" \
+    "libnvjitlink-dev-13-2=13.2.78-1" \
+    "libnvjpeg-dev-13-2=13.1.0.48-1" \
+    "libnvptxcompiler-13-2=13.2.78-1" \
+    "libnvvm-13-2=13.2.78-1" \
+ && apt-mark hold "${NV_LIBCUBLAS_DEV_PACKAGE_NAME}" \
+ && apt-get clean -y \
+ && rm -rf /var/lib/apt/lists/* \
+ && find /usr/local/cuda-13.2/targets/*/lib -name '*_static.a' ! -name 'libcudart_static.a' -delete
+
+# System packages
+RUN apt-get update -y \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    curl \
+    gnupg \
+    gosu \
+    libglib2.0-0 \
+    socat \
+    sudo \
+ && apt-get clean -y \
+ && rm -rf /var/lib/apt/lists/*
+
+# Enable passwordless sudo for all users and pass through environment and path
+RUN echo 'ALL ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers \
+ && sed -i -e 's/^Defaults\s*env_reset/Defaults !env_reset/' -e 's/^Defaults\s*secure_path=/#&/' /etc/sudoers
+
+# Install Python
+RUN curl -fsSL https://keyserver.ubuntu.com/pks/lookup?op=get\&search=0xBA6932366A755776 | gpg --dearmor -o /usr/share/keyrings/deadsnakes.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/deadsnakes.gpg] https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu jammy main" > /etc/apt/sources.list.d/deadsnakes-ppa.list \
+ && apt-get update -y \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-dev \
+    python${PYTHON_VERSION}-venv \
+ && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
+ && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/bin/python3 \
+ && ln -sf /usr/bin/python3 /usr/bin/python \
+ && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+ && ln -s /usr/local/bin/pip /usr/bin/pip \
+ && rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED \
+ && rm -rf /var/lib/apt/lists/*
+
+# Native build tools and OpenMPI, which mpi4py's wheel loads by default.
+RUN apt-get update -y \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    ninja-build \
+    openmpi-bin \
+    libopenmpi-dev \
+ && apt-get clean -y \
+ && rm -rf /var/lib/apt/lists/*
+
+# The Python stack. The wheels use the image's CUDA toolkit, so their bundled toolkit copy
+# (nvidia/cu13) goes. JAX loads cuDNN and NCCL from their own wheels.
+COPY brev/requirements.txt /opt/requirements.txt
+RUN pip install --no-cache-dir -r /opt/requirements.txt \
+ && rm -rf "/usr/local/lib/python${PYTHON_VERSION}/dist-packages/nvidia/cu13" \
+ && python -c 'from mpi4py import MPI; assert MPI.get_vendor()[0] == "Open MPI", MPI.get_vendor()' \
+ && python -m pip check \
+ && rm -f /opt/requirements.txt
+
+# cuPhoton: build steps for the workflows session's material (placeholder).
+
+# Install Nsight Systems and Nsight Compute, then remove everything except the
+# Nsight Compute CLI files needed to profile the native architecture. Keeping
+# installation and pruning in one layer prevents discarded files from taking
+# space in the final image.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "${arch}" in \
+      amd64) \
+        nsys_file="${NSIGHT_SYSTEMS_AMD64_DEB_FILE}"; \
+        ncu_native_target="linux-desktop-glibc_2_11_3-x64"; \
+        ;; \
+      arm64) \
+        nsys_file="${NSIGHT_SYSTEMS_ARM64_DEB_FILE}"; \
+        ncu_native_target="linux-desktop-t210-a64"; \
+        ;; \
+      *) \
+        echo "Unsupported architecture for Nsight packages: ${arch}" >&2; \
+        exit 1; \
+        ;; \
+    esac; \
+    nsys_url="https://developer.nvidia.com/downloads/assets/tools/secure/nsight-systems/${nsys_file}"; \
+    nsys_deb="${nsys_file##*/}"; \
+    curl -fL -o "${nsys_deb}" "${nsys_url}"; \
+    apt-get update -y; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      "./${nsys_deb}" \
+      "${NV_CUDA_NSIGHT_COMPUTE_DEV_PACKAGE}" \
+      "nsight-compute-${NSIGHT_COMPUTE_VERSION}=${NSIGHT_COMPUTE_PACKAGE_VERSION}"; \
+    rm -f "${nsys_deb}"; \
+    ncu_root="/opt/nvidia/nsight-compute/${NSIGHT_COMPUTE_VERSION}"; \
+    ncu_desktop="/usr/share/applications/nsight-compute-${NSIGHT_COMPUTE_VERSION}.desktop"; \
+    test -x "${ncu_root}/ncu"; \
+    find "${ncu_root}/target" -mindepth 1 -maxdepth 1 \
+      ! -name "${ncu_native_target}" -exec rm -rf {} +; \
+    rm -rf "${ncu_root}/host" "${ncu_root}/docs" "${ncu_root}/extras"; \
+    rm -f "${ncu_root}/ncu-ui" /usr/local/cuda-13.2/bin/ncu-ui "${ncu_desktop}"; \
+    test "$(find "${ncu_root}/target" -mindepth 1 -maxdepth 1 -type d -printf '%f\n')" = "${ncu_native_target}"; \
+    for removed in host docs extras ncu-ui; do test ! -e "${ncu_root}/${removed}"; done; \
+    test ! -e /usr/local/cuda-13.2/bin/ncu-ui; \
+    test ! -e "${ncu_desktop}"; \
+    "${ncu_root}/ncu" --version | grep -F "${NSIGHT_COMPUTE_VERSION}"; \
+    rm -rf "/opt/nvidia/nsight-systems-cli/${NSIGHT_SYSTEMS_VERSION}/documentation"; \
+    test -x "${NSYS_PATH}"; \
+    test -x "${NCU_PATH}"; \
+    mkdir -p /usr/local/nvidia/bin; \
+    ln -sfn "${NSYS_PATH}" /usr/local/nvidia/bin/nsys; \
+    ln -sfn "${NCU_PATH}" /usr/local/nvidia/bin/ncu; \
+    apt-get clean -y; \
+    rm -rf /var/lib/apt/lists/*
+
+# The nsightful kernels run a notebook's cells under Nsight Systems or Nsight Compute (notebook 04).
+# Installed for every user and made world-readable, then checked as an unprivileged user.
+RUN nsightful-ncu install --prefix=/usr/local '--profiler-args=--set full --clock-control none' \
+ && nsightful-nsys install --prefix=/usr/local '--profiler-args=--trace=cuda,nvtx,osrt' \
+ && chmod -R a+rX /usr/local/share/jupyter/kernels \
+ && gosu nobody env HOME=/tmp python -m jupyter kernelspec list --json \
+      | python -c 'import json, sys; specs = json.load(sys.stdin)["kernelspecs"]; missing = {"nsightful-ncu", "nsightful-nsys"} - specs.keys(); assert not missing, missing'
+
+# JupyterLab defaults for every user: the dark theme following the browser, cell timing, no
+# announcements. Without JupyterLab's own console tiles, the launcher's Console section shows
+# only the two Nsight tiles of brev/jupyter_server_config.py.
+COPY brev/jupyterlab-overrides.json /usr/local/share/jupyter/lab/settings/overrides.json
+RUN python -c 'from jupyterlab.commands import get_app_dir; assert get_app_dir() == "/usr/local/share/jupyter/lab", get_app_dir()' \
+ && python -m jupyter labextension disable "@jupyterlab/apputils-extension:announcements" \
+ && python -m jupyter labextension disable "@jupyterlab/console-extension:tracker"
+
+# CppJIT, built against the LLVM of stage 1
+ARG CPPJIT_REPO=https://github.com/aaronj0/cppjit-compres.git
+ARG CPPJIT_TAG=sc26
+ARG CPPJIT_COMMIT=7ed6fc638172ebb5d42b4907ca048470550f4491
+ENV CUDA=/usr/local/cuda-13.2 \
+    CPPJIT=/usr/local/lib/python${PYTHON_VERSION}/dist-packages/cppjit
+
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) cuda_target="x86_64-linux" ;; \
+      arm64) cuda_target="sbsa-linux" ;; \
+      *) echo "Unsupported CUDA target architecture: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac; \
+    test -d "${CUDA}/targets/${cuda_target}"; \
+    ln -sfn "${cuda_target}" "${CUDA}/targets/native-linux"
+
+RUN apt-get update -y \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    zlib1g-dev libzstd-dev \
+ && apt-get clean -y \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=bind,from=llvm-builder,source=/opt/llvm,target=/opt/llvm,readonly \
+    git clone --depth 1 --branch ${CPPJIT_TAG} ${CPPJIT_REPO} /opt/cppjit-src \
+ && test "$(git -C /opt/cppjit-src rev-parse HEAD)" = "${CPPJIT_COMMIT}" \
+ && pip install --no-cache-dir --root-user-action=ignore /opt/cppjit-src \
+      --config-settings=cmake.define.LLVM_DIR=/opt/llvm/lib/cmake/llvm \
+      --config-settings=cmake.define.Clang_DIR=/opt/llvm/lib/cmake/clang \
+ && so="${CPPJIT}/interop/lib/libclangCppInterOp.so" \
+ && test -f "${so}" && test ! -L "${so}" \
+ && find "${CPPJIT}/interop/lib" -maxdepth 1 -name 'libclangCppInterOp.so.*' -delete \
+ && strip --strip-unneeded "${so}" \
+ && rm -rf /opt/cppjit-src
+
+# CppJIT embeds Clang and only needs its resource headers at runtime. Mounting
+# the full LLVM install for the build avoids carrying another multi-gigabyte
+# compiler toolchain in the final image.
+COPY --from=llvm-builder /opt/llvm/lib/clang /opt/llvm/lib/clang
+
+ENV CPPJIT_ENABLE_CUDA=1
+ENV CPLUS_INCLUDE_PATH=/usr/include/python${PYTHON_VERSION}:${CPPJIT}/interop/include:${CUDA}/include:${CUDA}/targets/native-linux/include/cccl:${CUDA}/targets/native-linux/include
+ENV LD_LIBRARY_PATH=${CUDA}/lib64:${CUDA}/targets/native-linux/lib:${CPPJIT}/interop/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+
+# Build-time sanity check
+RUN test -f ${CUDA}/nvvm/libdevice/libdevice.10.bc \
+ && test -d /opt/llvm/lib/clang \
+ && CPPJIT_OFFLOAD_ARCH=sm_80 python -c "import cppjit, os; assert cppjit.CUDA_ENABLED; p=os.path.dirname(cppjit.__file__); \
+assert p=='${CPPJIT}', p; \
+assert os.path.exists(p+'/interop/lib/libclangCppInterOp.so'), 'CppInterOp .so missing'; \
+print('cppjit layer OK at', p)"
+
+# The Quijote particle positions of the cosmic-web mini-app, so that no instance downloads them at the session.
+RUN mkdir -p /opt/cosmic-web/data
+ADD --chmod=0444 --checksum=sha256:dea0cc8ac6be0c6758da305e40f34ec334bf6ad7ef9e6caa56c108a9664a28e7 https://github.com/aaronj0/accelerated-computing-hub/releases/download/sc26-data/quijote_fiducial_0_z0_positions.npy /opt/cosmic-web/data/
+ENV COSMIC_WEB_DATA=/opt/cosmic-web/data
+
+COPY --chmod=0777 . /sc2026-tutorial
+
+WORKDIR /sc2026-tutorial/notebooks
+
+ENTRYPOINT ["/sc2026-tutorial/brev/entrypoint.bash"]
+CMD ["jupyter"]

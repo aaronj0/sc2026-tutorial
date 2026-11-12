@@ -1,0 +1,37 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the check tools
+        run: pip install nbformat yamllint
+
+      - name: Notebooks are in canonical format
+        run: python3 brev/check-notebooks.py
+
+      - name: Relative links resolve
+        run: python3 brev/check-links.py
+
+      - name: YAML files
+        run: >
+          yamllint -d '{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable}}'
+          brev/docker-compose.yml brev/docker-compose.dev.yml .github/workflows .pre-commit-config.yaml
+
+      - name: Compose files
+        run: |
+          docker compose -f brev/docker-compose.yml config -q
+          docker compose -f brev/docker-compose.yml -f brev/docker-compose.dev.yml config -q
+
+      - name: Shell scripts
+        run: bash -n brev/entrypoint.bash brev/build.bash brev/runner-setup.bash brev/wrappers/nsys brev/wrappers/ncu

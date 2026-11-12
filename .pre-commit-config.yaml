@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: notebooks
+        name: Notebooks are in canonical format
+        entry: python3 brev/check-notebooks.py
+        language: system
+        files: '\.ipynb$'
+      - id: links
+        name: Relative links resolve
+        entry: python3 brev/check-links.py
+        language: system
+        files: '\.(md|ipynb)$'

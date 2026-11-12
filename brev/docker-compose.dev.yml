@@ -1,0 +1,10 @@
+# Development override: the checkout replaces the image's copy of the repository, so edits land
+# in the working tree. Usage:
+#   docker compose -f brev/docker-compose.yml -f brev/docker-compose.dev.yml up -d
+services:
+  jupyter:
+    volumes: [..:/sc2026-tutorial]
+  nsys:
+    volumes: [..:/sc2026-tutorial]
+  ncu:
+    volumes: [..:/sc2026-tutorial]
