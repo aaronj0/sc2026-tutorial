@@ -47,7 +47,8 @@ helpful but not required. The outline and the notebook list are in
 
 The tutorial runs in the container image `ghcr.io/pyhpc/sc2026-tutorial`. [brev/docker-compose.yml](brev/docker-compose.yml)
 starts JupyterLab on port 8888, opening on the outline, with Nsight Systems on port 8080 and Nsight Compute on
-port 8081 as launcher tiles. Brev starts this file. Locally, with Docker and the NVIDIA Container Toolkit installed:
+port 8081 as launcher tiles. Brev starts this file; [docs/brev.md](docs/brev.md) is the attendees' guide. Locally,
+with Docker and the NVIDIA Container Toolkit installed:
 
 ```bash
 docker compose -f brev/docker-compose.yml up -d
