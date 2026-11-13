@@ -1,10 +1,13 @@
 # Port overrides for the stack test of build.bash. The services publish their ports on host
 # ports the kernel picks, so the test runs beside whatever else listens on the host, such as the
 # JupyterLab that Brev instances run on port 8888. build.bash reads the picked ports back with
-# `docker compose port`. Brev deploys docker-compose.yml alone, with the fixed ports.
+# `docker compose port`. Brev deploys docker-compose.yml alone, with the fixed ports. The cuPhoton demo
+# test trains at batch size 16: the shipped 32 needs more memory than the L4 has.
 services:
   jupyter:
     ports: !override ["8888"]
+    environment:
+      CUPHOTON_DEMO_BATCH_SIZE: "16"
   nsys:
     ports: !override ["8080", "3478"]
   ncu:
