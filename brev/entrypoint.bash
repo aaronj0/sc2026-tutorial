@@ -56,7 +56,7 @@ test)
     cd "${ROOT}"
     # Package tests first, so a broken image fails before the notebooks run.
     if [ $# -eq 0 ]; then
-        set -- test/test_packages.py test/test_notebooks.py test/test_cosmic_web_notebooks.py
+        set -- test/test_packages.py test/test_notebooks.py test/test_cosmic_web_notebooks.py test/test_cuphoton_demo.py
     fi
     exec "${AS_USER[@]}" pytest "$@"
     ;;
