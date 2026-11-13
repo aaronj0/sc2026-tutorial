@@ -1,0 +1,15 @@
+# Scripts and figures that notebooks 05 and 12 write when they run.
+/barrier.py
+/compute_mandelbot.py
+/compute_pi.py
+/fizzbuzz.py
+/gather.py
+/hello_world.py
+/hello_world_with_ranks.py
+/reduce.py
+/scatter.py
+/send_recv.py
+/send_recv_eff.py
+/send_recv_numpy.py
+/dragon_bootstrap.py
+/test.png

@@ -1,0 +1,12 @@
+{
+  "@jupyterlab/apputils-extension:themes": {
+    "theme": "JupyterLab Dark",
+    "adaptive-theme": true,
+    "preferred-light-theme": "JupyterLab Light",
+    "preferred-dark-theme": "JupyterLab Dark",
+    "theme-scrollbars": false
+  },
+  "@jupyterlab/notebook-extension:tracker": {
+    "recordTiming": true
+  }
+}
