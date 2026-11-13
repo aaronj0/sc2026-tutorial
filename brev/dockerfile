@@ -158,7 +158,8 @@ RUN curl -fsSL https://keyserver.ubuntu.com/pks/lookup?op=get\&search=0xBA693236
  && rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED \
  && rm -rf /var/lib/apt/lists/*
 
-# Native build tools and OpenMPI, which mpi4py's wheel loads by default.
+# Native build tools and OpenMPI, which mpi4py's wheel loads by default; cfitsio, pkg-config
+# and GNU time for cuPhoton.
 RUN apt-get update -y \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential \
@@ -166,6 +167,9 @@ RUN apt-get update -y \
     ninja-build \
     openmpi-bin \
     libopenmpi-dev \
+    libcfitsio-dev \
+    pkg-config \
+    time \
  && apt-get clean -y \
  && rm -rf /var/lib/apt/lists/*
 
@@ -178,7 +182,25 @@ RUN pip install --no-cache-dir -r /opt/requirements.txt \
  && python -m pip check \
  && rm -f /opt/requirements.txt
 
-# cuPhoton: build steps for the workflows session's material (placeholder).
+# cuPhoton from source with its native extensions and the transient-chain example; its Python
+# dependencies are in requirements.txt. The workflow notebook reads the checkout through
+# CUPHOTON_DEMO_REPO, and the entrypoint prepares its dataset and model under scratch/.
+ARG CUPHOTON_REPO=https://github.com/NVIDIA/cuPhoton.git
+ARG CUPHOTON_COMMIT=b17cf8a30fa64c466c3e9b62ad98eccbb8f87cab
+RUN git clone "${CUPHOTON_REPO}" /opt/cuPhoton \
+ && git -C /opt/cuPhoton checkout --detach "${CUPHOTON_COMMIT}" \
+ && CUPHOTON_XDR_BUILD_EXT=1 \
+    CUPHOTON_XFIT_BUILD_EXT=1 \
+    CUPHOTON_IMAGING_BUILD_EXT=1 \
+    CUPHOTON_XFIT_CUDA_ARCHS=89 \
+    CUDA_HOME=/usr/local/cuda \
+    CUPHOTON_XFIT_CCCL_ROOT="/usr/local/lib/python${PYTHON_VERSION}/dist-packages/cupy/_core/include/cupy/_cccl" \
+    pip install --no-cache-dir --no-build-isolation --no-deps -e /opt/cuPhoton \
+ && pip install --no-cache-dir --no-deps -e /opt/cuPhoton/examples/transient-chain \
+ && python -m pip check \
+ && sed -i 's/^batch_size: 32$/batch_size: 16/' /opt/cuPhoton/examples/dragon-imaging-pipeline/train.example.yaml \
+ && mkdir -m 0777 /opt/cuPhoton/scratch
+ENV CUPHOTON_DEMO_REPO=/opt/cuPhoton
 
 # Install Nsight Systems and Nsight Compute, then remove everything except the
 # Nsight Compute CLI files needed to profile the native architecture. Keeping

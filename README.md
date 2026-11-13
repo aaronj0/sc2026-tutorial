@@ -70,10 +70,6 @@ workflow builds the image on a self-hosted GPU runner set up with `brev/runner-s
 in it, starts the Compose stack from it and publishes it: a pull request from a branch of this repository gets
 the tag `pr-<number>`, a push to `main` the tags `git-<sha>` and `latest`.
 
-## Acknowledgements
-
-Parts of this tutorial were developed with the assistance of Claude Opus 5.5 (Anthropic).
-
 ## Licences
 
 Written material is licensed under CC BY-NC-SA 4.0 ([LICENSE](LICENSE)) and code under Apache-2.0
