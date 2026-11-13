@@ -26,12 +26,13 @@ jobs:
       - name: YAML files
         run: >
           yamllint -d '{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable}}'
-          brev/docker-compose.yml brev/docker-compose.dev.yml .github/workflows .pre-commit-config.yaml
+          brev/docker-compose.yml brev/docker-compose.dev.yml brev/docker-compose.test.yml .github/workflows .pre-commit-config.yaml
 
       - name: Compose files
         run: |
           docker compose -f brev/docker-compose.yml config -q
           docker compose -f brev/docker-compose.yml -f brev/docker-compose.dev.yml config -q
+          docker compose -f brev/docker-compose.yml -f brev/docker-compose.test.yml config -q
 
       - name: Shell scripts
         run: bash -n brev/entrypoint.bash brev/build.bash brev/runner-setup.bash brev/wrappers/nsys brev/wrappers/ncu

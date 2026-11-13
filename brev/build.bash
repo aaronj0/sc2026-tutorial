@@ -72,7 +72,10 @@ echo "Built ${IMAGE}: ${SIZE_GB} GB uncompressed"
 # The tests run in a jupyter container of the Compose stack, on a volume seeded from this image.
 echo "Testing ${IMAGE}"
 export SC26_IMAGE="${IMAGE}"
-compose() { docker compose -f "${REPO_ROOT}/brev/docker-compose.yml" -p sc2026-tutorial-test "$@"; }
+compose() {
+    docker compose -f "${REPO_ROOT}/brev/docker-compose.yml" -f "${REPO_ROOT}/brev/docker-compose.test.yml" \
+        -p sc2026-tutorial-test "$@"
+}
 compose down -v --remove-orphans >/dev/null 2>&1 || true
 if [ "${CHAIN}" = true ]; then
     compose run --rm --no-deps -T jupyter test
@@ -82,7 +85,7 @@ fi
 compose down -v --remove-orphans >/dev/null
 
 # The stack as Brev starts it: a fresh volume seeded from the image, JupyterLab and the two Nsight
-# streamers up and answering on their published ports.
+# streamers up and answering. docker-compose.test.yml moves the published ports to free host ports.
 answers() {
     local service=${1} port=${2} url code
     url="http://$(compose port "${service}" "${port}")/"
