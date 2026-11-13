@@ -18,7 +18,7 @@ DEVICE_BYTES_PER_VOXEL = {
     "jax_bincount": 16,
     "cccl":          8,  # the field and CUB's scratch
     "numba":         4,  # the field and the histogram
-    "cppjit_cub":   48,  # the CuPy stencil's temporaries, then CUB's scratch
+    "cppjit_cub":    8,  # the field and CUB's scratch
     "cppjit_cuda":   4,  # the field and the histogram
 }
 DEVICE_FRACTION = 0.9    # the share of the device a stage may plan to hold
