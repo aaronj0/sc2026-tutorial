@@ -344,7 +344,7 @@ def test_dragon_and_cuphoton():
     assert torch.cuda.is_available()
     assert Path(os.environ["CUPHOTON_DEMO_REPO"], "examples", "dragon-imaging-pipeline", "demo.py").is_file()
     result = subprocess.run(["dragon", "--version"], capture_output=True, text=True, check=True)
-    assert "Dragon Version 0.14.2" in result.stdout, result.stdout + result.stderr
+    assert "Dragon Version 0.15.0" in result.stdout, result.stdout + result.stderr
 
 
 def test_mpi4py():

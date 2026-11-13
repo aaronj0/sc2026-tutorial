@@ -24,7 +24,8 @@ In this tutorial we will cover:
 - Programming models in Python for GPU applications: array expressions, fusion, library iterators, kernel authoring, and interoperability with CUDA C++ kernels.
 - Reading an application's profile with Nsight Systems and Nsight Compute.
 - Case studies of horizontal Python and C++ integration in domain sciences such as cancer research and high energy physics.
-- cuPhoton and DragonHPC (placeholder).
+- DragonHPC fundamentals enabling `multiprocessing` to scale across HPC multi-node resources.
+- cuPhoton astronomical image processing workflows orchestrated using DragonHPC.
 
 Attendees are expected to have general knowledge of HPC and Python programming. Some familiarity with NumPy and C/C++ is
 helpful but not required. The outline and the notebook list are in

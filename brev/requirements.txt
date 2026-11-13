@@ -39,7 +39,7 @@ nsightful[notebook] @ git+https://github.com/brycelelbach/nsightful.git@a4198940
 
 # Distributed computing. The mpi4py wheel loads the system OpenMPI.
 mpi4py == 4.1.2
-dragonhpc == 0.14.2
+dragonhpc == 0.15.0
 
 # Runtime and notebook execution utilities
 psutil == 7.2.2
