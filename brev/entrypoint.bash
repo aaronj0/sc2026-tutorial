@@ -37,6 +37,14 @@ export USER=${TUTORIAL_USER}
 HOME=$(getent passwd "${TUTORIAL_USER}" | cut -d: -f6)
 export HOME
 
+# The cuPhoton workflow notebook reads the dataset and model that prepare.py produces.
+prepare_cuphoton_demo() {
+    local root=${CUPHOTON_DEMO_REPO}/scratch/sc26-dragon
+    [ -f "${root}/prepared.json" ] && return
+    "${AS_USER[@]}" python "${CUPHOTON_DEMO_REPO}/examples/dragon-imaging-pipeline/prepare.py" \
+        --output "${root}" > "${root}.log" 2>&1 || { cat "${root}.log"; return 1; }
+}
+
 case "${SERVICE}" in
 jupyter)
     # jupyter-server-proxy reaches only localhost; forward the streamer ports of the other
@@ -48,11 +56,13 @@ jupyter)
     if [ -n "${1:-}" ]; then
         args+=(--LabApp.default_url="${1}")
     fi
+    prepare_cuphoton_demo &
     cd "${ROOT}/notebooks"
     exec "${AS_USER[@]}" python -m jupyter lab "${args[@]}"
     ;;
 test)
     nvidia-smi || { echo "The tests need a GPU and the NVIDIA container runtime." >&2; exit 1; }
+    prepare_cuphoton_demo
     cd "${ROOT}"
     # Package tests first, so a broken image fails before the notebooks run.
     if [ $# -eq 0 ]; then

@@ -333,10 +333,16 @@ def test_cppjit():
 
 
 def test_dragon_and_cuphoton():
-    """DragonHPC and cuPhoton are installed at the pinned versions."""
+    """DragonHPC and cuPhoton are installed at the pinned versions, with cuPhoton's extensions."""
     import cuphoton
+    import cuphoton.core._imaging_ext
+    import torch
+    from cuphoton.xdr import nvcomp_batch
 
-    assert cuphoton.__version__ == "0.1.3"
+    assert cuphoton.__version__ == "0.2.0.dev87+gb17cf8a"
+    assert nvcomp_batch.cpp_helper_available(), nvcomp_batch._CPP_EXT_IMPORT_ERROR
+    assert torch.cuda.is_available()
+    assert Path(os.environ["CUPHOTON_DEMO_REPO"], "examples", "dragon-imaging-pipeline", "demo.py").is_file()
     result = subprocess.run(["dragon", "--version"], capture_output=True, text=True, check=True)
     assert "Dragon Version 0.14.2" in result.stdout, result.stdout + result.stderr
 
