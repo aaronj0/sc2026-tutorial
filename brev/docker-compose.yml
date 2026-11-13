@@ -1,0 +1,64 @@
+# The tutorial stack: JupyterLab from the tutorial image, with the Nsight Systems and Nsight
+# Compute GUIs streamed to the browser. Brev starts this file as it is. The named volume is
+# seeded from the image's copy of the repository the first time the jupyter container is
+# created, so the streamers depend on it; docker-compose.dev.yml mounts a checkout instead.
+name: sc2026-tutorial
+
+x-gpu: &gpu
+  privileged: true  # Nsight Systems samples the CPU through perf events.
+  ulimits:
+    memlock: -1
+    stack: 67108864
+  shm_size: 1g
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+x-env: &env
+  TUTORIAL_UID: ${TUTORIAL_UID:-1000}
+  TUTORIAL_GID: ${TUTORIAL_GID:-1000}
+
+x-service: &service
+  <<: *gpu
+  user: root  # The entrypoint creates the tutorial user and switches to it.
+  volumes:
+    - tutorial:/sc2026-tutorial
+  environment: *env
+  restart: unless-stopped
+
+services:
+  jupyter:
+    <<: *service
+    image: ${SC26_IMAGE:-ghcr.io/pyhpc/sc2026-tutorial:latest}
+    command:
+      - jupyter
+      - /lab/tree/sc2026-tutorial/notebooks/syllabi/sc26__8_hours.ipynb?file-browser-path=/sc2026-tutorial/notebooks
+    ports:
+      - "8888:8888"
+  nsys:
+    <<: *service
+    image: nvcr.io/nvidia/devtools/nsight-streamer-nsys:2026.1.1
+    entrypoint: [/sc2026-tutorial/brev/entrypoint.bash, nsight]
+    depends_on: [jupyter]
+    ports:
+      - "8080:8080"  # HTTP
+      - "3478:3478"  # TURN
+  ncu:
+    <<: *service
+    image: nvcr.io/nvidia/devtools/nsight-streamer-ncu:2026.2.1
+    entrypoint: [/sc2026-tutorial/brev/entrypoint.bash, nsight]
+    depends_on: [jupyter]
+    environment:
+      <<: *env
+      HTTP_PORT: "8081"
+      TURN_PORT: "3479"
+    ports:
+      - "8081:8081"  # HTTP
+      - "3479:3479"  # TURN
+
+volumes:
+  tutorial:

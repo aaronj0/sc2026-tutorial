@@ -1,0 +1,59 @@
+# Arrays
+# Numba 0.63 supports NumPy versions below 2.4.
+numpy == 2.3.5
+
+# Scientific/numeric
+# CuPy 14.2 supports SciPy versions below 1.18.
+scipy == 1.17.1
+matplotlib == 3.11.2
+scikit-image == 0.26.0
+
+# Dark mode detection
+jupyter-dark-detect == 0.1.0
+
+# Jupyter
+jupyter == 1.1.1
+jupyter-server-proxy == 4.5.0
+jupyterlab == 4.6.4
+jupyterlab-execute-time == 3.3.0
+
+# CUDA
+cuda-python == 13.2.0
+cuda-core == 1.2.0
+cupy-cuda13x == 14.2.0
+cuda-cccl[test-sysctk13] == 1.1.1
+numba-cuda == 0.30.4
+numba-cuda-mlir == 0.6.0
+
+# Programming models. JAX uses the system CUDA toolkit except for cuDNN and
+# NCCL, which it loads from these two wheels.
+jax[cuda13-local] == 0.11.1
+nvidia-cudnn-cu13 == 9.24.0.43
+nvidia-nccl-cu13 == 2.30.7
+numba == 0.63.1
+llvmlite == 0.46.0
+
+# NVIDIA developer tools
+nvtx == 0.2.16
+nsightful[notebook] @ git+https://github.com/brycelelbach/nsightful.git@a41989403430168e02ac3cfdc4060bca4ebb8040
+
+# Distributed computing. The mpi4py wheel loads the system OpenMPI.
+mpi4py == 4.1.2
+dragonhpc == 0.14.2
+
+# Runtime and notebook execution utilities
+psutil == 7.2.2
+nbformat == 5.11.1
+nbconvert == 7.17.2
+
+# Astronomy imaging. cuPhoton has no PyPI release. Its io extra pins older KvikIO
+# and nvCOMP than RAPIDS 26.8 allows, so both are pinned here instead.
+cuphoton[photometry,viz] @ git+https://github.com/NVIDIA/cuPhoton.git@b713503c7b818052646ec710cd56797d71317cbd  # v0.1.3
+kvikio-cu13 == 26.8.0
+nvidia-nvcomp-cu13 == 5.3.0.16
+# libkvikio-cu13 depends on the cuda-toolkit metapackage. Its wheels are deleted
+# after the install; the image's own toolkit serves instead.
+cuda-toolkit == 13.2.1
+
+# Testing
+pytest == 9.1.1

@@ -1,0 +1,79 @@
+name: Image
+
+# The image holds an LLVM build and is too large for GitHub-hosted runners, so this workflow runs
+# on the self-hosted Brev runner that brev/runner-setup.bash registers. Every run builds the
+# image, runs the package tests and every notebook in it, starts the Compose stack from it and
+# pushes it. A pull request is built only when its branch lives in this repository: a fork's
+# code never runs on the runner. The latest tag moves on a push to main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      latest:
+        description: Move the latest tag to the built image
+        type: boolean
+        default: false
+
+concurrency:
+  group: image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  runner:
+    # Fails within minutes when the Brev instance is stopped, instead of leaving the build queued
+    # for a day. Needs the repository secret RUNNER_STATUS_TOKEN (a fine-grained token that may
+    # read the repository's self-hosted runners); without it the check is skipped.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: The runner is online
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "RUNNER_STATUS_TOKEN is not set: not checking the runner"
+            exit 0
+          fi
+          online=$(gh api "repos/${{ github.repository }}/actions/runners" \
+            --jq '[.runners[] | select(.status == "online" and any(.labels[]; .name == "sc26-builder"))] | length')
+          if [ "${online}" -eq 0 ]; then
+            echo "::error::No runner with label sc26-builder is online. Start the Brev instance sc26-ci, then re-run this workflow."
+            exit 1
+          fi
+          echo "${online} runner(s) online"
+
+  image:
+    needs: runner
+    runs-on: [self-hosted, sc26-builder]
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true  # the slides and figures are LFS objects; the image copies the checkout
+
+      - name: Log in to the registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build, test and push
+        run: >
+          brev/build.bash --push --chain --owner "${{ github.repository_owner }}"
+          ${{ github.event_name == 'pull_request' && format('--tag pr-{0}', github.event.pull_request.number) || '' }}
+          ${{ (github.event_name == 'push' || inputs.latest) && '--latest' || '' }}
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f build/summary.md ]; then cat build/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "Stop the Brev instance sc26-ci when no other build is queued." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log out of the registry
+        if: always()
+        run: docker logout ghcr.io

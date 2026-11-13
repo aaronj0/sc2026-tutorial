@@ -1,0 +1,7 @@
+# BuildKit configuration of the builder that brev/build.bash creates. The default garbage
+# collection keeps a few gigabytes and evicts the LLVM build first; these limits keep the whole
+# image cache on the runner's disk between builds.
+[worker.oci]
+  gc = true
+  reservedSpace = "120GB"
+  maxUsedSpace = "160GB"

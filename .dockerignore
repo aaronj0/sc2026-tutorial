@@ -1,0 +1,18 @@
+.git
+.github
+build
+**/.ipynb_checkpoints
+**/__pycache__
+**/.pytest_cache
+# Files the notebooks write when they run.
+**/timings
+**/machine.json
+**/data
+**/nsys-probes
+**/nsys-reports
+**/*.nsys-rep
+**/*.qdstrm
+**/*.sqlite
+**/*.npz
+**/notebooks/distributed/*.py
+**/notebooks/distributed/test.png
