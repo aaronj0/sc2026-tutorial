@@ -68,7 +68,8 @@ python3 brev/check-links.py                                                     
 The two checks also run as pre-commit hooks (`pre-commit install`) and in the `Checks` workflow. The `Image`
 workflow builds the image on a self-hosted GPU runner set up with `brev/runner-setup.bash`, runs every notebook
 in it, starts the Compose stack from it and publishes it: a pull request from a branch of this repository gets
-the tag `pr-<number>`, a push to `main` the tags `git-<sha>` and `latest`.
+the tag `pr-<number>`, a push to `main` the tags `git-<sha>` and `latest`. The runner is the Brev instance
+`sc26-ci`: the workflow starts it with the repository secret `BREV_API_KEY` and stops it after a green build.
 
 ## Licences
 

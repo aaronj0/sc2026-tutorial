@@ -5,6 +5,12 @@ name: Image
 # image, runs the package tests and every notebook in it, starts the Compose stack from it and
 # pushes it. A pull request is built only when its branch lives in this repository: a fork's
 # code never runs on the runner. The latest tag moves on a push to main.
+#
+# The runner is the Brev instance sc26-ci, which costs money while it runs. The wake job starts it
+# with the Brev API key in the repository secret BREV_API_KEY (an org-scoped key from the Brev
+# Console, Account Settings > API Keys) and waits until the runner reports online; the sleep job
+# stops it once the build is green and no other build is queued or running. A failed or cancelled
+# build leaves the instance running for inspection: stop it by hand with `brev stop sc26-ci`.
 on:
   push:
     branches: [main]
@@ -24,33 +30,70 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  actions: read  # the sleep job looks for other builds before stopping the instance
+
+env:
+  BREV_INSTANCE: sc26-ci
 
 jobs:
-  runner:
-    # Fails within minutes when the Brev instance is stopped, instead of leaving the build queued
-    # for a day. Needs the repository secret RUNNER_STATUS_TOKEN (a fine-grained token that may
-    # read the repository's self-hosted runners); without it the check is skipped.
+  wake:
+    # Starts the Brev instance when it is stopped and waits for the runner, instead of leaving the
+    # build queued for a day. The wait needs the repository secret RUNNER_STATUS_TOKEN (a
+    # fine-grained token that may read the repository's self-hosted runners); without it the job
+    # starts the instance and lets the build queue until the runner connects.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: The runner is online
+      - name: Install the Brev CLI
+        run: |
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/brevdev/brev-cli/main/bin/install-latest.sh)"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Start the instance
+        env:
+          BREV_API_KEY: ${{ secrets.BREV_API_KEY }}
+        run: |
+          if [ -z "${BREV_API_KEY}" ]; then
+            echo "::error::BREV_API_KEY is not set: cannot start the Brev instance ${BREV_INSTANCE}. Start it by hand, then re-run this workflow."
+            exit 1
+          fi
+          brev login --api-key "${BREV_API_KEY}" >/dev/null
+          status=$(brev ls --json | jq -r --arg name "${BREV_INSTANCE}" '.workspaces[] | select(.name == $name) | .status')
+          echo "${BREV_INSTANCE} is ${status:-missing}"
+          case "${status}" in
+            RUNNING) ;;
+            STOPPED) brev start "${BREV_INSTANCE}" ;;
+            STARTING) ;;
+            *) echo "::error::Brev instance ${BREV_INSTANCE} is ${status:-missing}; expected RUNNING or STOPPED"; exit 1 ;;
+          esac
+          for _ in $(seq 60); do
+            status=$(brev ls --json | jq -r --arg name "${BREV_INSTANCE}" '.workspaces[] | select(.name == $name) | .status')
+            [ "${status}" = RUNNING ] && break
+            sleep 10
+          done
+          echo "${BREV_INSTANCE} is ${status}"
+          [ "${status}" = RUNNING ]
+
+      - name: Wait for the runner
         env:
           GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
         run: |
           if [ -z "${GH_TOKEN}" ]; then
-            echo "RUNNER_STATUS_TOKEN is not set: not checking the runner"
+            echo "RUNNER_STATUS_TOKEN is not set: not waiting for the runner; the build queues until it connects"
             exit 0
           fi
-          online=$(gh api "repos/${{ github.repository }}/actions/runners" \
-            --jq '[.runners[] | select(.status == "online" and any(.labels[]; .name == "sc26-builder"))] | length')
-          if [ "${online}" -eq 0 ]; then
-            echo "::error::No runner with label sc26-builder is online. Start the Brev instance sc26-ci, then re-run this workflow."
-            exit 1
-          fi
-          echo "${online} runner(s) online"
+          for _ in $(seq 60); do
+            online=$(gh api "repos/${{ github.repository }}/actions/runners" \
+              --jq '[.runners[] | select(.status == "online" and any(.labels[]; .name == "sc26-builder"))] | length')
+            if [ "${online}" -gt 0 ]; then echo "${online} runner(s) online"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::No runner with label sc26-builder came online within ten minutes of starting ${BREV_INSTANCE}."
+          exit 1
 
   image:
-    needs: runner
+    needs: wake
     runs-on: [self-hosted, sc26-builder]
     timeout-minutes: 300
     steps:
@@ -72,8 +115,40 @@ jobs:
         run: |
           if [ -f build/summary.md ]; then cat build/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
           echo >> "$GITHUB_STEP_SUMMARY"
-          echo "Stop the Brev instance sc26-ci when no other build is queued." >> "$GITHUB_STEP_SUMMARY"
+          echo "A green build stops the Brev instance ${BREV_INSTANCE} in the sleep job; after a failure stop it by hand." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Log out of the registry
         if: always()
         run: docker logout ghcr.io
+
+  sleep:
+    # Stops the instance after a green build unless another build of this workflow is queued or
+    # running. Secrets are not passed to pull requests from forks, and those never reach this job.
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Look for other builds
+        id: others
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          others=$(gh api "repos/${{ github.repository }}/actions/workflows/image.yml/runs?per_page=50" \
+            --jq '[.workflow_runs[] | select(.id != ${{ github.run_id }} and (.status == "queued" or .status == "in_progress" or .status == "waiting"))] | length')
+          echo "${others} other build(s) queued or running"
+          echo "count=${others}" >> "$GITHUB_OUTPUT"
+
+      - name: Install the Brev CLI
+        if: steps.others.outputs.count == '0'
+        run: |
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/brevdev/brev-cli/main/bin/install-latest.sh)"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Stop the instance
+        if: steps.others.outputs.count == '0'
+        env:
+          BREV_API_KEY: ${{ secrets.BREV_API_KEY }}
+        run: |
+          brev login --api-key "${BREV_API_KEY}" >/dev/null
+          brev stop "${BREV_INSTANCE}"
+          echo "Stopped the Brev instance ${BREV_INSTANCE}." >> "$GITHUB_STEP_SUMMARY"
