@@ -9,7 +9,7 @@ x-gpu: &gpu
   ulimits:
     memlock: -1
     stack: 67108864
-  shm_size: 1g
+  shm_size: 6g  # Dragon 0.15 creates its memory pool in shared memory and asks for 6 GB.
   deploy:
     resources:
       reservations:
